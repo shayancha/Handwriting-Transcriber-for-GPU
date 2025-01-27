@@ -16,7 +16,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
     parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--decoder", choices=["bestpath, beamsearch, wordbeamsearch"], default="bestpath", help="Decoding method")
+    parser.add_argument("--decoder", choices=["bestpath", "beamsearch", "wordbeamsearch"], default="bestpath", help="Decoding method")
     parser.add_argument("--img_file", type=str, default=None, help="Path to an image for inference")
     parser.add_argument("--line_mode", action="store_true", help="Use line mode (for text lines)")
     parser.add_argument("--early-stopping", type=int, default=10, help="Early stopping epochs")
@@ -30,6 +30,15 @@ def train(args, char_list):
     dataloader = DataLoader(data_dir=Path(args.data_dir), preprocessor=preprocessor, batch_size=args.batch_size)
 
     dataloader.train_set()
+
+    with open("../wordCharList.txt", "w") as f:
+        word_chars = "".join([char for char in char_list if char.strip()])  # Remove invalid characters (e.g., spaces)
+        f.write(word_chars)
+
+    with open("../corpus.txt", "w") as f:
+        words = " ".join(dataloader.train_words + dataloader.validation_words)  # Combine train and validation words
+        f.write(words)
+
     train_dataset = HTRDataset(dataloader)
     train_loader = TorchDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, collate_fn=collate)
 
@@ -38,7 +47,7 @@ def train(args, char_list):
     val_loader = TorchDataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
     device = (args.device if torch.cuda.is_available() and args.device == "cuda" else "cpu")
-    model = HTRModel(char_list=char_list, decoder_type=DecoderType.BestPath).to(device)
+    model = HTRModel(char_list=char_list, decoder_type=DecoderType.WordBeamSearch).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     trainer = ModelTrainer(model=model, char_list=char_list, device=device)
 
@@ -57,7 +66,7 @@ def validate(args, char_list, model_dir="../models/best_model.pth"):
     val_loader = TorchDataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
     device = (args.device if torch.cuda.is_available() and args.device == "cuda" else "cpu")
-    model = HTRModel(char_list=char_list, decoder_type=DecoderType.BestPath)
+    model = HTRModel(char_list=char_list, decoder_type=DecoderType.WordBeamSearch)
     model.load_state_dict(torch.load(model_dir))
     model.to(device)
     model.eval()
@@ -80,7 +89,7 @@ def validate(args, char_list, model_dir="../models/best_model.pth"):
 
 def infer(args, char_list):
     device = (args.device if torch.cuda.is_available() and args.device == "cuda" else "cpu")
-    model = HTRModel(char_list=char_list, decoder_type=DecoderType.BestPath)
+    model = HTRModel(char_list=char_list, decoder_type=DecoderType.WordBeamSearch)
 
     # use next line when using cpu
     model.load_state_dict(torch.load("../models/best_model.pth", map_location=torch.device(device)))

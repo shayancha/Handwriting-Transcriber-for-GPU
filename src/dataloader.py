@@ -26,6 +26,9 @@ class DataLoader:
         self.train_samples = self.samples[:split_index]
         self.validation_samples = self.samples[split_index:]
 
+        self.train_words = self._extract_words(self.train_samples)
+        self.validation_words = self._extract_words(self.validation_samples)
+
         self.train_set()
 
     def _load_samples(self) -> List[Dict[str, Union[Path, str]]]:
@@ -44,6 +47,13 @@ class DataLoader:
                                     "ground_truth": ground_truth})
 
         return samples
+
+    def _extract_words(self, samples: List[Dict[str, Union[Path, str]]]) -> List[str]:
+        words = []
+        for sample in samples:
+            ground_truth = sample["ground_truth"]
+            words.extend(ground_truth.split())
+        return words
 
     def train_set(self) -> None:
         self.samples = self.train_samples
