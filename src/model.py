@@ -236,12 +236,12 @@ class ModelTrainer:
 
             for probs in log_probs_np:
                 wbs_prediction = WordBeamSearch(
-                    beam_width=50,
-                    lm_type="Words",
-                    lm_smoothing=0.0,
-                    corpus=self.model.corpus,
-                    chars="".join(self.char_list),
-                    word_chars=self.model.word_chars,
+                    50,
+                    "Words",
+                    0.0,
+                    self.model.corpus,
+                    "".join(self.char_list),
+                    self.model.word_chars,
                 )
                 predictions.append(wbs_prediction)
 
@@ -256,4 +256,4 @@ class ModelTrainer:
                     prev_char = index
                 predictions.append("".join(decoded))
 
-            return predictions
+        return predictions
