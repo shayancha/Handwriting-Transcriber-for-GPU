@@ -108,6 +108,8 @@ class ModelTrainer:
             self.console.print(f"\n[bold green]Epoch {epoch_num}/{num_epochs}[/bold green]")
             self.model.train()
             epoch_train_losses = []
+            total_train_words = 0
+            correct_train_words = 0
 
             with tqdm(train_loader, desc="Training", total=len(train_loader), leave=False) as tbar:
                 for batch in train_loader:
@@ -129,11 +131,18 @@ class ModelTrainer:
 
                     epoch_train_losses.append(loss.item())
 
+                    predictions = self.decode_predictions(log_probs)
+                    for gt, pred in zip(ground_truths, predictions):
+                        total_train_words += 1
+                        correct_train_words += 1 if gt == pred else 0
+
                     tbar.update(1)
                     tbar.set_postfix({"loss": loss.item(), "batch_time": f"{time.time()-start_time:.2f}s"})
 
             avg_train_loss = sum(epoch_train_losses) / len(epoch_train_losses)
+            train_accuracy = correct_train_words / total_train_words
             self.console.print(f"[bold blue]Training Loss:[/bold blue] {avg_train_loss:.4f}")
+            self.console.print(f"[bold blue]Training Word Accuracy:[/bold blue] {train_accuracy:.4f}")
 
             val_loss = self.validate(val_loader)
             print(f"[bold yellow]Validation loss:[/bold yellow] {val_loss:.4f}")
@@ -190,7 +199,7 @@ class ModelTrainer:
 
         char_error_rate = total_char_errors / total_chars
         word_accuracy = correct_words / total_words
-        print(f"CER: {char_error_rate:.4f}, Word Accuracy: {word_accuracy:.4f}")
+        self.console.print(f"Validation - CER: {char_error_rate:.4f}, Word Accuracy: {word_accuracy:.4f}")
         return sum(val_losses) / len(val_losses)
 
     def infer(self, test_loader: DataLoader):
