@@ -229,21 +229,25 @@ class ModelTrainer:
 
     def decode_predictions(self, log_probs: torch.Tensor):
         log_probs_np = log_probs.cpu().detach().numpy()
+        log_probs_np = log_probs_np.transpose(1, 0, 2)
         predictions = []
 
         if self.model.decoder_type == DecoderType.WordBeamSearch:
-            char_map = {c: i for i, c in enumerate(self.char_list)}
+            wbs = WordBeamSearch(
+                50,
+                "Words",
+                0.0,
+                self.model.corpus.encode('utf8'),
+                "".join(self.char_list).encode('utf8'),
+                self.model.word_chars.encode('utf8'),
+            )
 
-            for probs in log_probs_np:
-                wbs_prediction = WordBeamSearch(
-                    50,
-                    "Words",
-                    0.0,
-                    self.model.corpus,
-                    "".join(self.char_list),
-                    self.model.word_chars,
-                )
-                predictions.append(wbs_prediction)
+            decoded_prediction = wbs.compute(log_probs_np)
+            for pred in decoded_prediction:
+                if isinstance(pred, bytes):
+                    predictions.append(pred.decode("utf8"))
+                else:
+                    predictions.append(pred)
 
         elif self.model.decoder_type == DecoderType.BestPath:
             pred_indices = torch.argmax(log_probs, dim=2)
