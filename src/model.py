@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 import time
@@ -8,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader as TorchDataLoader
 from dataloader import DataLoader
-from torch.optim import Adam
+from torch.optim import AdamW, Adam
 
 import editdistance
 from tqdm import tqdm
@@ -98,20 +99,20 @@ class ModelTrainer:
         self.device = device
         self.console = Console()
 
-    def train(self, train_loader: TorchDataLoader, val_loader: TorchDataLoader, optimizer: Adam, num_epochs: int, save_dir="../models"):
+    def train(self, train_loader: TorchDataLoader, val_loader: TorchDataLoader, optimizer: AdamW, num_epochs: int, save_dir="../models"):
         os.makedirs(save_dir, exist_ok=True)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=3, verbose=True)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=3)
         best_val_loss = float("inf")
         early_stopping_counter = 0
 
         for epoch_num, epoch in enumerate(range(num_epochs), start=1):
-            self.console.print(f"\n[bold green]Epoch {epoch_num}/{num_epochs}[/bold green]")
+            self.console.log(f"[bold green]Epoch {epoch_num}/{num_epochs}[/bold green]")
             self.model.train()
             epoch_train_losses = []
             total_train_words = 0
             correct_train_words = 0
 
-            with tqdm(train_loader, desc="Training", total=len(train_loader), leave=False) as tbar:
+            with tqdm(train_loader, desc=f"Training - Epoch {epoch_num}", total=len(train_loader), leave=True) as tbar:
                 for batch in train_loader:
                     start_time = time.time()
 
@@ -141,29 +142,29 @@ class ModelTrainer:
 
             avg_train_loss = sum(epoch_train_losses) / len(epoch_train_losses)
             train_accuracy = correct_train_words / total_train_words
-            self.console.print(f"[bold blue]Training Loss:[/bold blue] {avg_train_loss:.4f}")
-            self.console.print(f"[bold blue]Training Word Accuracy:[/bold blue] {train_accuracy:.4f}")
+            self.console.log(f"[bold blue]Training Loss:[/bold blue] {avg_train_loss:.4f}")
+            self.console.log(f"[bold blue]Training Word Accuracy:[/bold blue] {train_accuracy:.4f}")
 
             val_loss = self.validate(val_loader)
-            print(f"[bold yellow]Validation loss:[/bold yellow] {val_loss:.4f}")
+            self.console.log(f"[bold yellow]Validation loss:[/bold yellow] {val_loss:.4f}")
 
             scheduler.step(val_loss)
 
             model_path = os.path.join(save_dir, f"model_epoch_{epoch_num}.pth")
             torch.save(self.model.state_dict(), model_path)
-            self.console.print(f"[bold green]Model saved at {model_path}[/bold green]")
+            self.console.log(f"[bold green]Model saved at {model_path}[/bold green]")
 
             if val_loss < best_val_loss:
                 best_val_loss = avg_train_loss
                 early_stopping_counter = 0
                 best_model_path = os.path.join(save_dir, "best_model.pth")
                 torch.save(self.model.state_dict(), best_model_path)
-                self.console.print(f"[bold green]Best model saved at {best_model_path} with loss: {best_val_loss:.4f}[/bold green]")
+                self.console.log(f"[bold green]Best model saved at {best_model_path} with loss: {best_val_loss:.4f}[/bold green]")
             else:
                 early_stopping_counter+=1
 
             if early_stopping_counter >= 5:
-                self.console.print("[bold red]Early stopping: No improvement in validation loss for 5 epochs[/bold red]")
+                self.console.log("[bold red]Early stopping: No improvement in validation loss for 5 epochs[/bold red]")
                 break
 
     def validate(self, val_loader: TorchDataLoader) -> float:
@@ -175,8 +176,10 @@ class ModelTrainer:
         correct_words = 0
 
         with torch.no_grad():
-            with tqdm(val_loader, desc="Validating", leave=False) as tbar:
+            with tqdm(val_loader, desc="Validating", leave=True) as tbar:
                 for batch in val_loader:
+                    start_time = time.time()
+
                     images = batch["images"].to(self.device)
                     ground_truths = batch["ground_truths"]
 
@@ -197,9 +200,12 @@ class ModelTrainer:
                         total_words += 1
                         correct_words += 1 if gt == pred else 0
 
+                    tbar.update(1)
+                    tbar.set_postfix({"loss": loss.item(), "batch_time": f"{time.time() - start_time:.2f}s"})
+
         char_error_rate = total_char_errors / total_chars
         word_accuracy = correct_words / total_words
-        self.console.print(f"Validation - CER: {char_error_rate:.4f}, Word Accuracy: {word_accuracy:.4f}")
+        self.console.log(f"Validation - CER: {char_error_rate:.4f}, Word Accuracy: {word_accuracy:.4f}")
         return sum(val_losses) / len(val_losses)
 
     def infer(self, test_loader: DataLoader):
@@ -228,26 +234,16 @@ class ModelTrainer:
         return torch.tensor(targets, dtype=torch.long).to(self.device), torch.tensor(lengths, dtype=torch.long).to(self.device)
 
     def decode_predictions(self, log_probs: torch.Tensor):
-        log_probs_np = log_probs.cpu().detach().numpy()
+        log_probs_np = torch.nn.functional.softmax(log_probs, dim=2).cpu().detach().numpy()
         log_probs_np = log_probs_np.transpose(1, 0, 2)
         predictions = []
 
         if self.model.decoder_type == DecoderType.WordBeamSearch:
-            wbs = WordBeamSearch(
-                50,
-                "Words",
-                0.0,
-                self.model.corpus.encode('utf8'),
-                "".join(self.char_list).encode('utf8'),
-                self.model.word_chars.encode('utf8'),
-            )
+            wbs = WordBeamSearch(50, "Words", 0.0, self.model.corpus.encode('utf8'), "".join(self.char_list).encode('utf8'), self.model.word_chars.encode('utf8'))
 
             decoded_prediction = wbs.compute(log_probs_np)
-            for pred in decoded_prediction:
-                if isinstance(pred, bytes):
-                    predictions.append(pred.decode("utf8"))
-                else:
-                    predictions.append(pred)
+            # predictions = [pred.decode("utf8") if isinstance(pred, bytes) else pred for pred in decoded_prediction]
+            predictions = ["".join(self.char_list[idx] for idx in pred if idx < len(self.char_list)) for pred in decoded_prediction]
 
         elif self.model.decoder_type == DecoderType.BestPath:
             pred_indices = torch.argmax(log_probs, dim=2)
@@ -260,4 +256,5 @@ class ModelTrainer:
                     prev_char = index
                 predictions.append("".join(decoded))
 
+        # eventually add beamsearch if needed
         return predictions

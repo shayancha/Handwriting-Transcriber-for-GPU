@@ -15,7 +15,7 @@ def parse_args():
     parser.add_argument("--data-dir", type=str, required=True, help="Path to the dataset directory")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
     parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--decoder", choices=["bestpath", "beamsearch", "wordbeamsearch"], default="bestpath", help="Decoding method")
     parser.add_argument("--img_file", type=str, default=None, help="Path to an image for inference")
     parser.add_argument("--line_mode", action="store_true", help="Use line mode (for text lines)")
@@ -24,7 +24,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def train(args, char_list):
+def train(args, char_list, decoder):
     preprocessor = Preprocessor(target_img_size=(342, 2320), shear_factors=np.linspace(-0.5, 0.5, 50), padding=50)
 
     dataloader = DataLoader(data_dir=Path(args.data_dir), preprocessor=preprocessor, batch_size=args.batch_size)
@@ -32,11 +32,11 @@ def train(args, char_list):
     dataloader.train_set()
 
     with open("../wordCharList.txt", "w") as f:
-        word_chars = "".join([char for char in char_list if char.strip()])  # Remove invalid characters (e.g., spaces)
+        word_chars = "".join([char for char in char_list if char.strip()])
         f.write(word_chars)
 
     with open("../corpus.txt", "w") as f:
-        words = " ".join(dataloader.train_words + dataloader.validation_words)  # Combine train and validation words
+        words = " ".join(dataloader.train_words + dataloader.validation_words)
         f.write(words)
 
     train_dataset = HTRDataset(dataloader)
@@ -47,17 +47,14 @@ def train(args, char_list):
     val_loader = TorchDataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
     device = (args.device if torch.cuda.is_available() and args.device == "cuda" else "cpu")
-    model = HTRModel(char_list=char_list, decoder_type=DecoderType.WordBeamSearch).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    model = HTRModel(char_list=char_list, decoder_type=decoder).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     trainer = ModelTrainer(model=model, char_list=char_list, device=device)
 
     trainer.train(train_loader=train_loader, val_loader=val_loader, optimizer=optimizer, num_epochs=args.epochs)
 
-    # add validation to each training epoch - should switch to validation dataset!
-    # a val_loader should get passed to train()
 
-
-def validate(args, char_list, model_dir="../models/best_model.pth"):
+def validate(args, char_list, decoder, model_dir="../models/best_model.pth"):
     preprocessor = Preprocessor(target_img_size=(342, 2320), shear_factors=np.linspace(-0.5, 0.5, 50), padding=50)
     dataloader = DataLoader(data_dir=Path(args.data_dir), preprocessor=preprocessor, batch_size=args.batch_size)
 
@@ -66,7 +63,7 @@ def validate(args, char_list, model_dir="../models/best_model.pth"):
     val_loader = TorchDataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
     device = (args.device if torch.cuda.is_available() and args.device == "cuda" else "cpu")
-    model = HTRModel(char_list=char_list, decoder_type=DecoderType.WordBeamSearch)
+    model = HTRModel(char_list=char_list, decoder_type=decoder)
     model.load_state_dict(torch.load(model_dir))
     model.to(device)
     model.eval()
@@ -87,13 +84,20 @@ def validate(args, char_list, model_dir="../models/best_model.pth"):
     print(f"Validation Loss: {total_loss / len(val_loader)}")
 
 
-def infer(args, char_list):
+def decode_text(indices, char_list):
+    return "".join([char_list[idx] if idx < len(char_list) else "" for idx in indices])
+
+
+def infer(args, char_list, decoder):
     device = (args.device if torch.cuda.is_available() and args.device == "cuda" else "cpu")
-    model = HTRModel(char_list=char_list, decoder_type=DecoderType.WordBeamSearch)
+    # model = HTRModel(char_list=char_list, decoder_type=DecoderType.WordBeamSearch)
+    model = HTRModel(char_list=char_list, decoder_type=decoder)
 
     # use next line when using cpu
-    model.load_state_dict(torch.load("../models/best_model.pth", map_location=torch.device(device)))
-    # model.load_state_dict(torch.load("models/best_model.pth"))
+    model_path = "../models/best_model.pth"
+    if decoder == DecoderType.WordBeamSearch:
+        model_path = "../models_wordbeamsearch/best_model.pth"
+    model.load_state_dict(torch.load(model_path, map_location=torch.device(device)))
 
     model.to(device)
     model.eval()
@@ -109,22 +113,37 @@ def infer(args, char_list):
         log_probs = torch.nn.functional.log_softmax(logits, dim=2)
         trainer = ModelTrainer(model=model, char_list=char_list, device=device)
         prediction = trainer.decode_predictions(log_probs)
+        # if decoder == DecoderType.WordBeamSearch:
+        #     decoded_text = decode_text(prediction[0], char_list)
+        #     print(f"Predicted Text: {decoded_text}")
+        # else:
         print(f"Predicted Text: {prediction[0]}")
+
+
+def load_char_list():
+    with open("../wordCharList.txt", "r") as f:
+        return list(f.read().strip())
 
 
 def main():
     args = parse_args()
+
     char_list = list("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?-'\":{}[]/\_+=`~;#@$%^&*() ")
 
+    decoder_mapping = {'bestpath': DecoderType.BestPath,
+                       'beamsearch': DecoderType.BeamSearch,
+                       'wordbeamsearch': DecoderType.WordBeamSearch}
+    decoder = decoder_mapping[args.decoder]
+
     if args.mode == "train":
-        train(args, char_list)
+        train(args, char_list, decoder)
     elif args.mode == "validate":
-        validate(args, char_list)
+        validate(args, char_list, decoder)
     elif args.mode == "infer":
         if args.img_file is None:
             print("Please specify an image  file for inference using --img-file")
         else:
-            infer(args, char_list)
+            infer(args, char_list, decoder)
 
 
 if __name__ == "__main__":
