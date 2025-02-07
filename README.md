@@ -8,4 +8,4 @@ Repo for running trainings from TranscribeThis! on a GPU instance
 3. pip install other libraries: `pip install tqdm rich editdistance opencv-python numpy albumentations symspellpy`
 
 ## Run Training
-`python main.py --mode train --data-dir ../large_iam_lines  --epochs 20 --decoder wordbeamsearch --device cuda`
+`python main.py --mode train --data-dir ../large_iam_lines  --epochs 20 --decoder bestpath --device cuda`
