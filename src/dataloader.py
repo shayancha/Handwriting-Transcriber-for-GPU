@@ -6,19 +6,29 @@ from pathlib import Path
 from preprocess import Preprocessor
 import torch
 from torch.utils.data import Dataset
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
 
 # maybe add custom Sample and Batch types
 class DataLoader:
-    def __init__(self,
-                 data_dir: Path,
-                 preprocessor: Preprocessor,
-                 batch_size: int,
-                 data_split: float = 0.8):
+    def __init__(self, data_dir: Path, preprocessor: Preprocessor, batch_size: int, data_split: float = 0.8, augment: bool = False):
         self.data_dir = data_dir
         self.preprocessor = preprocessor
         self.batch_size = batch_size
         self.current_index = 0
+        self.augment = augment
+
+        self.augmentations = A.Compose([
+            A.RandomBrightnessContrast(p=0.3),
+            A.GaussianBlur(blur_limit=(3, 7), p=0.3),
+            A.Affine(scale=(0.8, 1.2), translate_percent=(0.1, 0.1), rotate=(-10, 10), shear=(-10, 10), p=0.3),
+            A.ElasticTransform(alpha=1, sigma=50, p=0.3),
+            A.GridDistortion(p=0.3),
+            A.Perspective(scale=(0.05, 0.15), p=0.2),
+            A.Normalize(mean=[0.5], std=[0.5]),
+            ToTensorV2()
+        ])
 
         self.samples = self._load_samples()
 
@@ -29,6 +39,8 @@ class DataLoader:
         self.train_words = self._extract_words(self.train_samples)
         self.validation_words = self._extract_words(self.validation_samples)
 
+        # might not need mode to check if mode is correct for augmentation
+        self.mode = "train"
         self.train_set()
 
     def _load_samples(self) -> List[Dict[str, Union[Path, str]]]:
@@ -56,11 +68,13 @@ class DataLoader:
         return words
 
     def train_set(self) -> None:
+        self.mode = "train"
         self.samples = self.train_samples
         self.current_index = 0
         random.shuffle(self.samples)
 
     def validation_set(self) -> None:
+        self.mode = "validate"
         self.samples = self.validation_samples
         self.current_index = 0
         # probably do not need to shuffle validation set
@@ -85,6 +99,11 @@ class DataLoader:
 
             if img is not None:
                 processed_img = self.preprocessor.process_img(img, gray_level)
+
+                print(f"Augmenting batch: {self.augment}")
+                if self.augment and self.mode == "train":
+                    processed_img = self.apply_augmentation(processed_img)
+
                 processed_imgs.append(processed_img)
                 ground_truths.append(ground_truth)
             else:
@@ -98,11 +117,21 @@ class DataLoader:
             "batch_size": len(processed_imgs)
         }
 
+    def apply_augmentation(self, img):
+        img = np.expand_dims(img, axis=-1)
+        img = self.augmentations(image=img)["image"]
+
+        if isinstance(img, torch.Tensor):
+            img = img.cpu().numpy()
+
+        return img.squeeze(0)
+
 
 class HTRDataset(Dataset):
-    def __init__(self, dataloader: DataLoader):
+    def __init__(self, dataloader: DataLoader, augment: bool = False):
         self.dataloader = dataloader
         self.samples = self.dataloader.samples
+        self.augment = augment
 
     def __len__(self):
         return len(self.samples)
@@ -115,7 +144,11 @@ class HTRDataset(Dataset):
 
         img = cv2.imread(str(file_path), cv2.IMREAD_GRAYSCALE)
         img = self.dataloader.preprocessor.process_img(img, gray_level)
-        img = torch.tensor(img, dtype=torch.float32).unsqueeze(0) / 255.0
+
+        if self.dataloader.augment:
+            img = self.dataloader.apply_augmentation(img)
+
+        img = torch.from_numpy(img).clone().detach().float().unsqueeze(0) / 255.0
 
         return {"image": img, "ground_truth": ground_truth}
 

@@ -3,7 +3,6 @@ import math
 import os
 import time
 from typing import List, Tuple
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,6 +17,7 @@ from rich.table import Table
 
 import word_beam_search
 from word_beam_search import WordBeamSearch
+from symspellpy import SymSpell, Verbosity
 
 
 class DecoderType:
@@ -101,7 +101,8 @@ class ModelTrainer:
 
     def train(self, train_loader: TorchDataLoader, val_loader: TorchDataLoader, optimizer: AdamW, num_epochs: int, save_dir="../models"):
         os.makedirs(save_dir, exist_ok=True)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=3)
+        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=3)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
         best_val_loss = float("inf")
         early_stopping_counter = 0
 
@@ -233,12 +234,29 @@ class ModelTrainer:
 
         return torch.tensor(targets, dtype=torch.long).to(self.device), torch.tensor(lengths, dtype=torch.long).to(self.device)
 
+    def correct_spelling(self, text):
+        sym_spell = SymSpell(max_dictionary_edit_distance=2)
+        sym_spell.load_dictionary("../frequency_dictionary_en_82_765.txt", 0, 1)
+
+        words = text.split()
+        corrected_words = []
+        for word in words:
+            suggestions = sym_spell.lookup(word, Verbosity.CLOSEST, max_edit_distance=2)
+            if suggestions:
+                corrected_words.append(suggestions[0].term)
+            else:
+                corrected_words.append(word)
+
+        return " ".join(corrected_words)
+
     def decode_predictions(self, log_probs: torch.Tensor):
         log_probs_np = torch.nn.functional.softmax(log_probs, dim=2).cpu().detach().numpy()
         log_probs_np = log_probs_np.transpose(1, 0, 2)
         predictions = []
 
         if self.model.decoder_type == DecoderType.WordBeamSearch:
+            # increase beam_width (first parameter) to improve accuracy (try 50-100)
+            # lower lm_weight to reduce overcorrection (try 0.05-0.15)
             wbs = WordBeamSearch(50, "Words", 0.0, self.model.corpus.encode('utf8'), "".join(self.char_list).encode('utf8'), self.model.word_chars.encode('utf8'))
 
             decoded_prediction = wbs.compute(log_probs_np)
@@ -257,4 +275,7 @@ class ModelTrainer:
                 predictions.append("".join(decoded))
 
         # eventually add beamsearch if needed
+
+        # test using this - see if it actually helps
+        # predictions = [self.correct_spelling(pred) for pred in predictions]
         return predictions

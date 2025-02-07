@@ -27,7 +27,7 @@ def parse_args():
 def train(args, char_list, decoder):
     preprocessor = Preprocessor(target_img_size=(342, 2320), shear_factors=np.linspace(-0.5, 0.5, 50), padding=50)
 
-    dataloader = DataLoader(data_dir=Path(args.data_dir), preprocessor=preprocessor, batch_size=args.batch_size)
+    dataloader = DataLoader(data_dir=Path(args.data_dir), preprocessor=preprocessor, batch_size=args.batch_size, augment=True)
 
     dataloader.train_set()
 
@@ -39,11 +39,11 @@ def train(args, char_list, decoder):
         words = " ".join(dataloader.train_words + dataloader.validation_words)
         f.write(words)
 
-    train_dataset = HTRDataset(dataloader)
+    train_dataset = HTRDataset(dataloader, augment=True)
     train_loader = TorchDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, collate_fn=collate)
 
     dataloader.validation_set()
-    val_dataset = HTRDataset(dataloader)
+    val_dataset = HTRDataset(dataloader, augment=False)
     val_loader = TorchDataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
     device = (args.device if torch.cuda.is_available() and args.device == "cuda" else "cpu")
@@ -93,10 +93,9 @@ def infer(args, char_list, decoder):
     # model = HTRModel(char_list=char_list, decoder_type=DecoderType.WordBeamSearch)
     model = HTRModel(char_list=char_list, decoder_type=decoder)
 
-    # use next line when using cpu
     model_path = "../models/best_model.pth"
-    if decoder == DecoderType.WordBeamSearch:
-        model_path = "../models_wordbeamsearch/best_model.pth"
+    # if decoder == DecoderType.WordBeamSearch:
+    #     model_path = "../models_wordbeamsearch/best_model.pth"
     model.load_state_dict(torch.load(model_path, map_location=torch.device(device)))
 
     model.to(device)

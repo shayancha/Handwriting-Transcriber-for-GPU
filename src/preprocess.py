@@ -92,10 +92,34 @@ class Preprocessor:
 
         return desheared_img
 
+    def correct_rotation(self, img):
+        edges = cv2.Canny(img, 50, 150, apertureSize=3)
+        lines = cv2.HoughLines(edges, 1, np.pi / 180, 200)
+
+        if lines is not None:
+            angle_sum = 0
+            for rho, theta in lines[:, 0]:
+                angle_sum += theta
+            average_angle = (angle_sum / len(lines)) * 180 / np.pi - 90
+
+            M_rot = cv2.getRotationMatrix2D((img.shape[1] / 2, img.shape[0] / 2), average_angle, 1)
+            img = cv2.warpAffine(img, M_rot, (img.shape[1], img.shape[0]), borderValue=255)
+
+        return img
+
+    def contrast_normalization(self, img):
+        mean, std_dev = cv2.meanStdDev(img)
+        normalized_img = (img - mean) / (std_dev + 1e-6)
+        normalized_img = np.clip(normalized_img * 128 + 128, 0, 255).astype(np.uint8)
+        return normalized_img
+
     def process_img(self, img, gray_level=None):
         new_img = self.binarize(img, gray_level)
         new_img = self.pad_horizontally(new_img)
         new_img = self.deslant(new_img)
+        # maybe try training with contrast normalization? but actually hurt inference performance
+        # new_img = self.contrast_normalization(new_img)
+        new_img = self.correct_rotation(new_img)
         new_img = self.resize_with_padding(new_img)
         return new_img
 
@@ -123,7 +147,7 @@ def main():
     #
     #             print(f"img number: {line_num }, image_id: {image_id}")
 
-    preprocessor = Preprocessor((max_img_height, max_img_width), shear_factors, padding, automatic_binarization=True)
+    preprocessor = Preprocessor((128, 32), shear_factors, padding, automatic_binarization=True)
     original_img = cv2.imread("../large_iam_lines/dataset/a01-000u-s00-00.png", cv2.IMREAD_GRAYSCALE)
     preprocessed_img = preprocessor.process_img(original_img)
     cv2.imwrite("../selfmade_inference_dataset/preprocessed/selfMade_0.png", preprocessed_img)
@@ -131,4 +155,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
