@@ -3,3 +3,5 @@ src/__pycache__
 __pycache__
 .idea
 .DS_Store
+large_iam_lines.zip
+large_iam_lines/
