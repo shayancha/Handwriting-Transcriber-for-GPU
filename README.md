@@ -7,6 +7,7 @@ Repo for running trainings from TranscribeThis! on a GPU instance
 4. pip install torch: `pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121`
 5. pip install other libraries: `pip install transformers opencv-python numpy tf-keras transformers[torch]`
 6. transfer files large_iam_lines.zip from local computer over to GPU instance using `scp -i ~/.ssh/my-key.pem ~/path/to/local_file ubuntu@instance-ip-address:~/path/to/destination` (note: it must be placed at the root of the Handwriting-Transcriber-for-GPU directory)
+7. `unzip large_iam_lines.zip`
 
 ## Run Training
 `python src/main.py --mode train --img_dir "large_iam_lines/dataset/" --metadata "large_iam_lines/metadata/sentences.txt"`
