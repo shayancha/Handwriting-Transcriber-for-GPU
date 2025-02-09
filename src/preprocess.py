@@ -8,6 +8,8 @@ class TrOCRImageProcessor:
     def __init__(self, image_size=(384, 384), binarization=True, deslanting=True):
         self.image_size = image_size
         self.processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
+        # for faster inference and training use below
+        # self.processor = TrOCRProcessor.from_pretrained("microsoft/trocr-small-handwritten")
         self.binarization = binarization
         self.deslanting = deslanting
 
@@ -21,8 +23,7 @@ class TrOCRImageProcessor:
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
 
         if self.binarization:
-            # maybe use binarization threshold from metadata instead? might cause overfitting though
-            _, img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
 
         if self.deslanting:
             img = self.deslant(img)
@@ -36,7 +37,7 @@ class TrOCRImageProcessor:
         max_score = -1
         best_shear_factor = 0
         rows, cols = img.shape
-        shear_factors = np.linspace(-0.5, 0.5, 50)
+        shear_factors = np.linspace(-0.3, 0.3, 50)
 
         for alpha in shear_factors:
             shear_matrix = np.float32([[1, alpha, 0], [0, 1, 0]])
@@ -49,5 +50,3 @@ class TrOCRImageProcessor:
 
         shear_matrix = np.float32([[1, best_shear_factor, 0], [0, 1, 0]])
         return cv2.warpAffine(img, shear_matrix, (cols, rows), flags=cv2.INTER_NEAREST, borderValue=255)
-
-

@@ -3,6 +3,8 @@ from transformers import VisionEncoderDecoderModel
 
 def load_trocr_model():
     model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-handwritten")
+    # for faster training and inference, use below
+    # model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-small-handwritten")
 
     if model.config.decoder_start_token_id is None:
         model.config.decoder_start_token_id = model.config.pad_token_id
